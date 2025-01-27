@@ -1,0 +1,65 @@
+---
+# Build and publish image(s) to GitHub (ghcr.io)
+# Publishing to GitHub requires a username (who triggered the action)
+# and password (as the secrets GITHUB_TOKEN)
+# remember to change repo-name and set dockerfile(s)/image name(s) in the matrix
+
+name: Publish Docker Image
+on:
+  release:
+    types: [published]
+  # option to run manually
+  workflow_dispatch: {}
+jobs:
+  push_to_registry:
+    # only generate images when in the named repo
+    # (to avoid running the action in forks)
+    if: github.repository == 'ScilifelabDataCentre/node-pathogens-portal-demo'
+    name: Publish Docker Image
+    runs-on: ubuntu-latest
+    # Cancel earlier job if there is a new one for the same branch/release
+    concurrency:
+      group: ${{ github.ref }}-docker-build
+      cancel-in-progress: true
+    # Define the images/tags to build; will run in parallell
+    strategy:
+      matrix:
+        include:
+          - dockerfile: Dockerfile
+            images: ghcr.io/scilifelabdatacentre/node-pathogens-portal-demo
+    permissions: write-all
+    steps:
+      - name: Checkout current repo
+        uses: actions/checkout@v4
+      - name: Checkout node-pathogen-portal repo
+        uses: actions/checkout@v4
+        with:
+          repository: ScilifelabDataCentre/node-pathogens-portal
+          path: node-pathogens-portal
+          submodules: true
+      # only needed when publishing to Github (ghcr.io)
+      - name: Log in to Github Container Repository
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          # will run as the user who triggered the action, using its token
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Docker Meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.images }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+      - name: Build and Publish
+        uses: docker/build-push-action@v6
+        with:
+          file: ${{ matrix.dockerfile }}
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
